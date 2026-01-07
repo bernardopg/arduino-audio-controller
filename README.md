@@ -1,8 +1,38 @@
 # 🎛️ Arduino Audio Controller
 
-Controlador de áudio físico para Linux usando Arduino Nano e potenciômetros B10K.
+Controlador de áudio físico para Linux usando Arduino Nano e potenciômetros B10K. Desenvolvido com Python (GTK4/LibAdwaita) e Firmware C++.
 
 ![Screenshot](screenshot.png)
+
+## 📋 Descrição do Repositório (GitHub)
+
+**Descrição:** Controlador de volume físico para Linux usando Arduino Nano e Python/GTK4. Controle volumes de apps individuais (Spotify, Chrome) via potenciômetros.
+**Tags:** `arduino` `linux` `python` `gtk4` `libadwaita` `pulseaudio` `volume-mixer` `maker` `hardware`
+
+## ✅ TO-DO
+
+- [x] Criar e adicionar `icon.png` ao repositório
+- [x] Adicionar screenshot atualizada da interface (`screenshot.png`)
+- [x] Implementar seletor de aplicativos na GUI
+- [x] Adicionar suporte a PipeWire nativo (via compatibilidade pulsectl/pipewire-pulse)
+- [ ] Criar pacote AUR para fácil instalação no Arch Linux
+- [x] Melhorar tratamento de desconexão USB
+
+## 🏗️ Arquitetura e Protocolo
+
+### Comunicação Serial
+O Arduino envia leituras dos potenciômetros via Serial (9600 baud) no formato:
+`P<ID>:<VALOR>`
+- `ID`: Número do potenciômetro (1, 2, 3)
+- `VALOR`: Leitura analógica (0-1023)
+
+Exemplo: `P1:512` (Potenciômetro 1 em 50%)
+
+### Estrutura do Software
+1. **Firmware (.ino)**: Loop de leitura com *debounce* simples. Envia dados apenas quando há variação significativa (`THRESHOLD = 5`).
+2. **Backend Python**: Thread dedicada lê a porta Serial.
+3. **PulseAudio Bridge**: Mapeia valores 0-1023 para 0.0-1.0 e aplica ao *Sink* (Master) ou *SinkInput* (Apps) correspondente usando `pulsectl`.
+4. **GUI (GTK4)**: Exibe níveis em tempo real e gerencia conexão. Atualizações de UI são feitas via `GLib.idle_add` para thread-safety.
 
 ## ✨ Características
 
@@ -47,7 +77,7 @@ sudo pacman -S arduino-cli python python-gobject gtk4 libadwaita imagemagick
 
 ### 2. Clonar repositório
 ```bash
-git clone https://github.com/SEU_USUARIO/arduino-audio-controller.git
+git clone https://github.com/bernardopg/arduino-audio-controller.git
 cd arduino-audio-controller
 ```
 
@@ -138,9 +168,9 @@ MIT License - veja [LICENSE](LICENSE) para detalhes.
 
 ## 👤 Autor
 
-**Bernardo (bitter)**
+**Bernardo Gomes (bitter)**
 
-- GitHub: [@SEU_USUARIO](https://github.com/SEU_USUARIO)
+- GitHub: [@bernardopg](https://github.com/bernardopg)
 
 ## 🙏 Agradecimentos
 

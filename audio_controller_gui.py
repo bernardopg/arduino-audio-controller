@@ -15,7 +15,7 @@ class AudioControllerApp(Adw.Application):
         self.pulse = pulsectl.Pulse('audio-controller')
         self.ser = None
         self.running = False
-        self.app1_name = "chrome"
+        self.app1_name = "firefox"
         self.app2_name = "spotify"
         
     def do_activate(self):
@@ -77,33 +77,47 @@ class AudioControllerWindow(Adw.ApplicationWindow):
         master_box.append(self.master_progress)
         self.volume_group.add(master_box)
         
-        # App 1 volume (Chrome)
-        self.app1_row = Adw.ActionRow()
-        self.app1_row.set_title("🌐 Google Chrome")
+        # App 1 volume
+        self.app1_model = Gtk.StringList()
+        self.app1_row = Adw.ComboRow()
+        self.app1_row.set_title("🎚️ Potenciômetro 2")
+        self.app1_row.set_subtitle("Selecionar aplicação")
+        self.app1_row.set_model(self.app1_model)
+        self.app1_row.connect("notify::selected-item", self.on_app1_changed)
+        
         self.app1_label = Gtk.Label(label="---%")
         self.app1_label.set_width_chars(5)
         self.app1_row.add_suffix(self.app1_label)
+        
         self.app1_progress = Gtk.LevelBar()
         self.app1_progress.set_min_value(0)
         self.app1_progress.set_max_value(100)
         self.app1_progress.set_hexpand(True)
         self.app1_progress.set_margin_top(8)
+        
         app1_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         app1_box.append(self.app1_row)
         app1_box.append(self.app1_progress)
         self.volume_group.add(app1_box)
         
-        # App 2 volume (Spotify)
-        self.app2_row = Adw.ActionRow()
-        self.app2_row.set_title("🎵 Spotify")
+        # App 2 volume
+        self.app2_model = Gtk.StringList()
+        self.app2_row = Adw.ComboRow()
+        self.app2_row.set_title("🎚️ Potenciômetro 3")
+        self.app2_row.set_subtitle("Selecionar aplicação")
+        self.app2_row.set_model(self.app2_model)
+        self.app2_row.connect("notify::selected-item", self.on_app2_changed)
+        
         self.app2_label = Gtk.Label(label="---%")
         self.app2_label.set_width_chars(5)
         self.app2_row.add_suffix(self.app2_label)
+        
         self.app2_progress = Gtk.LevelBar()
         self.app2_progress.set_min_value(0)
         self.app2_progress.set_max_value(100)
         self.app2_progress.set_hexpand(True)
         self.app2_progress.set_margin_top(8)
+        
         app2_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         app2_box.append(self.app2_row)
         app2_box.append(self.app2_progress)
@@ -117,6 +131,10 @@ class AudioControllerWindow(Adw.ApplicationWindow):
         button_box.set_halign(Gtk.Align.CENTER)
         button_box.set_margin_top(12)
         button_box.set_margin_bottom(12)
+        
+        self.refresh_button = Gtk.Button(label="🔄 Atualizar Apps")
+        self.refresh_button.connect("clicked", self.refresh_apps)
+        button_box.append(self.refresh_button)
         
         self.start_button = Gtk.Button(label="▶ Iniciar")
         self.start_button.add_css_class("suggested-action")
@@ -148,8 +166,48 @@ class AudioControllerWindow(Adw.ApplicationWindow):
         main_box.append(clamp)
         
         # Auto-start
+        self.refresh_apps(None)
         GLib.timeout_add(1000, self.auto_start)
         
+    def refresh_apps(self, button):
+        try:
+            apps = set()
+            for sink_input in self.app.pulse.sink_input_list():
+                name = sink_input.proplist.get('application.name')
+                if name:
+                    apps.add(name)
+            
+            sorted_apps = sorted(list(apps))
+            
+            # Update models
+            # Helper to update stringlist
+            def update_model(model, items):
+                # Simple clear and refill (inefficient but safe for small lists)
+                while model.get_n_items() > 0:
+                    model.remove(0)
+                for item in items:
+                    model.append(item)
+                    
+            update_model(self.app1_model, sorted_apps)
+            update_model(self.app2_model, sorted_apps)
+            
+            # Restore selection if possible, otherwise defaults
+            # (Simplification: just finding string match)
+            # For now, let user select.
+            
+        except Exception as e:
+            print(f"Error refreshing apps: {e}")
+
+    def on_app1_changed(self, row, param):
+        selected = row.get_selected_item()
+        if selected:
+            self.app.app1_name = selected.get_string()
+            
+    def on_app2_changed(self, row, param):
+        selected = row.get_selected_item()
+        if selected:
+            self.app.app2_name = selected.get_string()
+
     def auto_start(self):
         self.on_start_clicked(None)
         return False
@@ -158,43 +216,58 @@ class AudioControllerWindow(Adw.ApplicationWindow):
         if self.app.running:
             return
             
-        # Find Arduino
-        ports = serial.tools.list_ports.comports()
-        arduino_port = None
-        for port in ports:
-            if 'USB' in port.device or 'ACM' in port.device:
-                arduino_port = port.device
-                break
+        # Start in "Disconnected" state, let thread handle connection
+        self.app.running = True
+        self.start_button.set_sensitive(False)
+        self.stop_button.set_sensitive(True)
+        self.update_status("⌛ Iniciando...", False)
         
-        if not arduino_port:
-            self.update_status("❌ Desconectado", False)
-            return
-            
-        try:
-            self.app.ser = serial.Serial(arduino_port, 9600, timeout=1)
-            time.sleep(2)
-            self.app.running = True
-            self.update_status("✅ Conectado", True)
-            self.start_button.set_sensitive(False)
-            self.stop_button.set_sensitive(True)
-            
-            # Start reading thread
-            thread = threading.Thread(target=self.read_arduino, daemon=True)
-            thread.start()
-        except Exception as e:
-            self.update_status(f"❌ Erro: {e}", False)
+        # Start reading thread
+        thread = threading.Thread(target=self.read_arduino, daemon=True)
+        thread.start()
             
     def on_stop_clicked(self, button):
         self.app.running = False
         if self.app.ser:
-            self.app.ser.close()
+            try:
+                self.app.ser.close()
+            except:
+                pass
+            self.app.ser = None
         self.update_status("⏹ Parado", False)
         self.start_button.set_sensitive(True)
         self.stop_button.set_sensitive(False)
         
     def read_arduino(self):
         while self.app.running:
+            # Reconnection logic
+            if self.app.ser is None:
+                try:
+                    GLib.idle_add(self.update_status, "⌛ Procurando Arduino...", False)
+                    ports = serial.tools.list_ports.comports()
+                    found = False
+                    for port in ports:
+                        if 'USB' in port.device or 'ACM' in port.device:
+                            self.app.ser = serial.Serial(port.device, 9600, timeout=1)
+                            found = True
+                            time.sleep(2) # Wait for Arduino reset
+                            GLib.idle_add(self.update_status, "✅ Conectado", True)
+                            break
+                    
+                    if not found:
+                        time.sleep(2)
+                        continue
+                except Exception as e:
+                    print(f"Reconnect error: {e}")
+                    time.sleep(2)
+                    continue
+
+            # Reading logic
             try:
+                if self.app.ser is None or not self.app.ser.is_open:
+                    self.app.ser = None
+                    continue
+
                 if self.app.ser.in_waiting > 0:
                     line = self.app.ser.readline().decode('utf-8', errors='ignore').strip()
                     
@@ -213,8 +286,16 @@ class AudioControllerWindow(Adw.ApplicationWindow):
                     elif pot == 'P3':
                         GLib.idle_add(self.update_app2, volume, percent)
                         
+            except (serial.SerialException, OSError) as e:
+                print(f"Connection lost: {e}")
+                GLib.idle_add(self.update_status, "❌ Desconectado", False)
+                if self.app.ser:
+                    try: self.app.ser.close()
+                    except: pass
+                self.app.ser = None
+                time.sleep(1)
             except Exception as e:
-                print(f"Erro: {e}")
+                print(f"Read error: {e}")
                 time.sleep(0.1)
                 
     def update_master(self, volume, percent):
